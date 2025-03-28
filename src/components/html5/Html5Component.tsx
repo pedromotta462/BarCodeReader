@@ -45,11 +45,6 @@ const Html5Component: React.FC = () => {
       const config = {
         fps: 10,
         qrbox: { width: 250, height: 100 },
-        formatsToSupport: [
-          Html5Qrcode.FORMATS.CODE_128,
-          Html5Qrcode.FORMATS.ITF,
-          Html5Qrcode.FORMATS.EAN_13
-        ],
         aspectRatio: 1.0
       };
 

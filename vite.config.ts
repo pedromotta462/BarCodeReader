@@ -1,34 +1,45 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react-swc'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react-swc";
+import { resolve } from 'path';
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  
-  // Configuração para WebAssembly
+
+  // Configuração específica para WASM
   optimizeDeps: {
-    exclude: ['zbar.wasm']
+    exclude: ['@undecaf/zbar-wasm']
   },
-  
-  // Configuração para tratamento de arquivos binários
-  assetsInclude: ['**/*.wasm', '**/*.bin'],
-  
-  // Habilitar suporte a WebAssembly
+
+  // Copiar arquivos WASM para pasta pública durante o build
   build: {
-    target: 'esnext',
+    assetsInlineLimit: 0, // Não inlinear arquivos grandes como WASM
     rollupOptions: {
       output: {
         manualChunks: {
-          wasm: ['zbar.wasm']
+          // Separar dependências WebAssembly
+          'zbar-wasm': ['@undecaf/zbar-wasm']
         }
       }
     }
   },
-  
-  // Resolver caminhos para importação
+
+  // Configuração para garantir tratamento correto de arquivos WASM e BIN
+  assetsInclude: ['**/*.wasm', '**/*.bin'],
+
   resolve: {
     alias: {
-      'zbar.wasm': 'zbar.wasm/dist'
+      // Ajudar Vite a encontrar arquivos WASM
+      '@zbar-wasm': resolve(__dirname, 'node_modules/@undecaf/zbar-wasm/dist')
     }
-  }
-})
+  },
+
+  // Permitir qualquer host
+  server: {
+    allowedHosts: [
+      "localhost",
+      "127.0.0.1",
+      "51b6-2804-7f7-df02-948c-2595-3eaf-987b-3c9e.ngrok-free.app",
+    ],
+  },
+});

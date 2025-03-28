@@ -49,7 +49,7 @@ function App() {
     {
       id: "zxing",
       name: "ZXing",
-      component: <ZXingComponent setScannedData={ScannedData} />,
+      component: <ZXingComponent setScannedData={ScannedData}/>,
       scannedData: scannedDataZxing,
     },
     {
@@ -61,7 +61,7 @@ function App() {
     {
       id: "zbar.wasm",
       name: "Zbar.wasm",
-      component: <ZbarComponent />,
+      component: <ZbarComponent setScannedData={ScannedData}/>,
       scannedData: scannedDataZbar,
     },
     {
@@ -70,12 +70,12 @@ function App() {
       component: <Html5Component />,
       scannedData: scannedDataHtml5,
     },
-    {/*
+    {
       id: "dynamsoft",
       name: "Dynamsoft",
       component: <DynamsoftComponent />,
       scannedData: scannedDataDynamsoft,
-      */
+      
     },
     // Para adicionar uma nova biblioteca, basta adicionar um novo objeto aqui:
     // {

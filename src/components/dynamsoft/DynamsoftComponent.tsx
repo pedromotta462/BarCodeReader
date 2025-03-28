@@ -1,231 +1,216 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { BarcodeReader } from 'dynamsoft-barcode-reader-bundle';
-import './DynamsoftComponent.scss';
+import React from "react";
+import { BarcodeReader } from 'dynamsoft-javascript-barcode';
+import "./DynamsoftComponent.scss";
 
-// Substituir com sua chave de licença quando tiver uma
-BarcodeReader.license = "DLS2eyJoYW5kc2hha2VDb2RlIjoiMjAwMDAxLTE2NDk4Mjk3OTI2MzUiLCJvcmdhbml6YXRpb25JRCI6IjIwMDAwMSIsInNlc3Npb25QYXNzd29yZCI6IndTcGR6Vm05WDJrcEQ5YUoifQ==";
-// Em um ambiente de produção, você deve obter uma licença válida em https://www.dynamsoft.com/customer/license/trialLicense
+// Configuração Dynamsoft
+BarcodeReader.license = "DLS2eyJoYW5kc2hha2VDb2RlIjoiMTAzODQ0MzgxLVRYbFhaV0pRY205cSIsIm1haW5TZXJ2ZXJVUkwiOiJodHRwczovL21kbHMuZHluYW1zb2Z0b25saW5lLmNvbSIsIm9yZ2FuaXphdGlvbklEIjoiMTAzODQ0MzgxIiwic3RhbmRieVNlcnZlclVSTCI6Imh0dHBzOi8vc2Rscy5keW5hbXNvZnRvbmxpbmUuY29tIiwiY2hlY2tDb2RlIjoxNTgzNzM1OTQ4fQ==";
+BarcodeReader.engineResourcePath = "https://cdn.jsdelivr.net/npm/dynamsoft-javascript-barcode@9.6.30/dist/";
 
-const DynamsoftComponent: React.FC = () => {
-  const [result, setResult] = useState<string>('');
-  const [scanning, setScanning] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [readerReady, setReaderReady] = useState<boolean>(false);
-  
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const readerRef = useRef<BarcodeReader | null>(null);
-  const beepSound = useRef<HTMLAudioElement | null>(null);
-  const scanInterval = useRef<number | null>(null);
+class DynamsoftComponent extends React.Component {
+  state = {
+    reader: null,
+    isScanning: false,
+    result: "",
+    errorMessage: "",
+    readerReady: false
+  };
 
-  // Inicialização do leitor e som de feedback
-  useEffect(() => {
-    const initReader = async () => {
-      try {
-        // Inicializar o leitor Dynamsoft
-        const reader = await BarcodeReader.createInstance();
-        
-        // Configurar para formatos de código de barras para boletos brasileiros
-        await reader.updateRuntimeSettings("balance");
-        const settings = await reader.getRuntimeSettings();
-        settings.barcodeFormatIds = 
-          BarcodeReader.EnumBarcodeFormat.BF_CODE_128 | 
-          BarcodeReader.EnumBarcodeFormat.BF_ITF |
-          BarcodeReader.EnumBarcodeFormat.BF_EAN_13;
-        settings.expectedBarcodesCount = 1; // Otimiza para encontrar apenas um código por vez
-        settings.timeout = 5000; // 5 segundos por frame
-        await reader.updateRuntimeSettings(settings);
-        
-        readerRef.current = reader;
-        setReaderReady(true);
-      } catch (error) {
-        console.error('Failed to initialize Dynamsoft Barcode Reader:', error);
-        setErrorMessage('Falha ao inicializar o leitor de código de barras');
-      }
-    };
+  videoRef = React.createRef();
+  scanTimer = null;
+  containerRef = React.createRef();
+  beepSound = null;
 
-    // Inicializar som de beep
-    beepSound.current = new Audio('/beep.mp3');
-
-    initReader();
-
-    // Cleanup quando o componente for desmontado
-    return () => {
-      if (readerRef.current) {
-        readerRef.current.destroyContext();
-        readerRef.current = null;
-      }
+  async componentDidMount() {
+    this.beepSound = new Audio('/beep.mp3');
+    
+    try {
+      // Inicializa a biblioteca
+      await BarcodeReader.loadWasm();
       
-      if (scanInterval.current !== null) {
-        clearInterval(scanInterval.current);
-        scanInterval.current = null;
-      }
-    };
-  }, []);
+      // Cria leitor
+      const reader = await BarcodeReader.createInstance();
+      
+      // Configurações para boletos
+      await reader.updateRuntimeSettings("speed");
+      const settings = await reader.getRuntimeSettings();
+      
+      settings.expectedBarcodesCount = 1;
+      settings.minResultConfidence = 50;
+      await reader.updateRuntimeSettings(settings);
+      
+      this.setState({ 
+        reader,
+        readerReady: true 
+      });
+    } catch (error) {
+      console.error("Error initializing barcode reader:", error);
+      this.setState({ 
+        errorMessage: `Falha ao inicializar o leitor: ${error}`,
+        readerReady: false 
+      });
+    }
+  }
 
-  // Iniciar o scanner
-  const startScanner = async () => {
-    if (!readerReady || !readerRef.current) {
-      setErrorMessage('O leitor de código de barras não está pronto');
+  componentWillUnmount() {
+    this.stopScanning();
+    
+    if (this.state.reader) {
+      this.state.reader.destroyContext();
+    }
+  }
+
+  startScanning = async () => {
+    const { reader, readerReady } = this.state;
+    
+    if (!readerReady || !reader) {
+      this.setState({ errorMessage: 'O leitor de código de barras não está pronto' });
       return;
     }
 
     try {
-      setErrorMessage('');
-      setScanning(true);
+      this.setState({ isScanning: true, errorMessage: "" });
 
       // Acessar a câmera
-      const constraints = {
-        video: {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { 
+          facingMode: "environment",
           width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: "environment"
+          height: { ideal: 720 }
         }
-      };
+      });
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      if (this.videoRef.current) {
+        this.videoRef.current.srcObject = stream;
+        await this.videoRef.current.play();
 
-        // Iniciar o processo de scanning
-        scanInterval.current = window.setInterval(async () => {
-          if (!scanning || !videoRef.current || !readerRef.current) return;
-          
-          try {
-            const results = await readerRef.current.decode(videoRef.current);
-            
-            if (results.length > 0) {
-              // Filtramos para códigos que possam ser de boletos
-              const boletoCode = results.find(result => 
-                result.barcodeText && result.barcodeText.length >= 44
-              );
+        // Escanear frames regularmente
+        this.scanTimer = window.setInterval(async () => {
+          if (this.videoRef.current && reader) {
+            try {
+              const results = await reader.decode(this.videoRef.current);
               
-              if (boletoCode) {
-                // Reproduz som de confirmação
-                if (beepSound.current) {
-                  beepSound.current.play().catch(console.error);
-                }
+              if (results.length > 0) {
+                // Filtrar para códigos que parecem ser boletos
+                const boletoCode = results.find(result => 
+                  result.barcodeText && result.barcodeText.length >= 44
+                );
                 
-                setResult(boletoCode.barcodeText);
-                stopScanner();
+                if (boletoCode) {
+                  // Reproduz som de confirmação
+                  if (this.beepSound) {
+                    this.beepSound.play().catch(console.error);
+                  }
+                  
+                  this.setState({ result: boletoCode.barcodeText });
+                  this.stopScanning();
+                }
               }
+            } catch (err) {
+              // Erros de decodificação são comuns
             }
-          } catch (error) {
-            // Erros de frame são comuns, então apenas logamos
-            console.debug('Error scanning frame:', error);
           }
-        }, 100); // Verificar a cada 100ms
+        }, 200);
       }
     } catch (error) {
       console.error('Error starting scanner:', error);
-      setErrorMessage(`Erro ao acessar a câmera: ${error}`);
-      setScanning(false);
+      this.setState({ 
+        errorMessage: `Erro ao iniciar a câmera: ${error}`,
+        isScanning: false 
+      });
     }
   };
 
-  // Parar o scanner
-  const stopScanner = () => {
-    setScanning(false);
+  stopScanning = () => {
+    this.setState({ isScanning: false });
     
-    if (scanInterval.current !== null) {
-      clearInterval(scanInterval.current);
-      scanInterval.current = null;
+    if (this.scanTimer) {
+      clearInterval(this.scanTimer);
+      this.scanTimer = null;
     }
-
+    
     // Parar a stream de vídeo
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+    if (this.videoRef.current && this.videoRef.current.srcObject) {
+      const tracks = this.videoRef.current.srcObject.getTracks();
       tracks.forEach(track => track.stop());
-      videoRef.current.srcObject = null;
+      this.videoRef.current.srcObject = null;
     }
   };
 
-  // Limpar o resultado
-  const clearResult = () => {
-    setResult('');
+  clearResult = () => {
+    this.setState({ result: "" });
   };
 
-  return (
-    <div className="barcode-scanner-container">
-      <h2>Leitor de Códigos de Boletos (Dynamsoft)</h2>
-      
-      <div className="scanner-container">
-        {scanning ? (
-          <video 
-            ref={videoRef}
-            className="video-feed"
-            playsInline
-          />
-        ) : (
-          !result && (
-            <div className="scanner-placeholder">
-              <p>Clique em "Iniciar Scanner" para ler o código de barras</p>
-            </div>
-          )
-        )}
-      </div>
+  render() {
+    const { isScanning, result, errorMessage, readerReady } = this.state;
 
-      {errorMessage && (
-        <div className="error-message">
-          <p>{errorMessage}</p>
+    return (
+      <div className="barcode-scanner-container">
+        <h2>Leitor de Códigos de Boletos (Dynamsoft)</h2>
+        
+        <div className="scanner-container" ref={this.containerRef}>
+          {isScanning ? (
+            <video 
+              ref={this.videoRef}
+              className="video-feed"
+              playsInline
+            />
+          ) : (
+            !result && (
+              <div className="scanner-placeholder">
+                <p>Clique em "Iniciar Scanner" para ler o código de barras</p>
+              </div>
+            )
+          )}
         </div>
-      )}
 
-      {result && (
-        <div className="result-container">
-          <h3>Código Lido:</h3>
-          <p className="barcode-result">{result}</p>
-          <div className="result-info">
-            <p>Número de dígitos: {result.length}</p>
-            <p>Tipo: {result.length === 44 ? 'Código de Boleto Bancário' : 'Código de Barras'}</p>
+        {errorMessage && (
+          <div className="error-message">
+            <p>{errorMessage}</p>
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="button-container">
-        {!scanning && !result && (
-          <button 
-            className="action-button start-button" 
-            onClick={startScanner}
-            disabled={!readerReady}
-          >
-            {readerReady ? 'Iniciar Scanner' : 'Carregando...'}
-          </button>
-        )}
-        
-        {scanning && (
-          <button 
-            className="action-button stop-button" 
-            onClick={stopScanner}
-          >
-            Parar Scanner
-          </button>
-        )}
-        
-        {result && (
-          <>
-            <button 
-              className="action-button clear-button" 
-              onClick={clearResult}
-            >
-              Limpar Resultado
-            </button>
-            <button 
-              className="action-button scan-again-button" 
-              onClick={startScanner}
-            >
-              Ler Outro Código
-            </button>
-          </>
+        {result ? (
+          <div className="result-container">
+            <h3>Código Lido:</h3>
+            <p className="barcode-result">{result}</p>
+            <div className="result-info">
+              <p>Número de dígitos: {result.length}</p>
+              <p>Tipo: {result.length === 44 ? 'Código de Boleto Bancário' : 'Código de Barras'}</p>
+            </div>
+            <div className="result-actions">
+              <button className="action-button clear-button" onClick={this.clearResult}>
+                Limpar Resultado
+              </button>
+              <button className="action-button scan-again-button" onClick={this.startScanning}>
+                Ler Outro Código
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="button-container">
+            {!isScanning && (
+              <button 
+                className="action-button start-button" 
+                onClick={this.startScanning}
+                disabled={!readerReady}
+              >
+                {readerReady ? 'Iniciar Scanner' : 'Carregando...'}
+              </button>
+            )}
+            
+            {isScanning && (
+              <button 
+                className="action-button stop-button" 
+                onClick={this.stopScanning}
+              >
+                Parar Scanner
+              </button>
+            )}
+          </div>
         )}
       </div>
-
-      <div className="scanner-status">
-        {scanning && <div className="scanning-indicator">Escaneando...</div>}
-      </div>
-    </div>
-  );
-};
+    );
+  }
+}
 
 export default DynamsoftComponent;
